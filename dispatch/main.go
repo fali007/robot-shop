@@ -8,11 +8,18 @@ import (
 	"os"
 	"strconv"
 	"time"
+	"context"
 
-	"github.com/instana/go-sensor"
-	ot "github.com/opentracing/opentracing-go"
-	"github.com/opentracing/opentracing-go/ext"
-	otlog "github.com/opentracing/opentracing-go/log"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/streadway/amqp"
 )
 
@@ -35,6 +42,52 @@ var (
 		"us-west1",
 	}
 )
+
+func initTracer() *sdktrace.TracerProvider {
+	ctx := context.Background()
+	
+	exporter, err := otlptracegrpc.New(ctx)
+	if err != nil {
+		log.Fatalf("failed to create exporter: %v", err)
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceNameKey.String("dispatch"),
+		)),
+	)
+	
+    otel.SetTracerProvider(tp)
+    
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	
+    return tp
+}
+
+type AMQPHeaderCarrier map[string]interface{}
+
+func (h AMQPHeaderCarrier) Get(key string) string {
+	if v, ok := h[key]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+func (h AMQPHeaderCarrier) Set(key string, value string) {
+	h[key] = value
+}
+
+func (h AMQPHeaderCarrier) Keys() []string {
+	keys := make([]string, 0, len(h))
+	for k := range h {
+		keys = append(keys, k)
+	}
+	return keys
+}
 
 func connectToRabbitMQ(uri string) *amqp.Connection {
 	for {
@@ -104,75 +157,56 @@ func getOrderId(order []byte) string {
 }
 
 func createSpan(headers map[string]interface{}, order string) {
-	// headers is map[string]interface{}
-	// carrier is map[string]string
-	carrier := make(ot.TextMapCarrier)
-	// convert by copying k, v
-	for k, v := range headers {
-		carrier[k] = v.(string)
-	}
+	carrier := AMQPHeaderCarrier(headers)
+	ctx := otel.GetTextMapPropagator().Extract(context.Background(), carrier)
 
-	// get the order id
-	log.Printf("order %s\n", order)
+	tracer := otel.Tracer("dispatch-service")
+	
+    log.Printf("order %s\n", order)
 
-	// opentracing
-	var span ot.Span
-	tracer := ot.GlobalTracer()
-	spanContext, err := tracer.Extract(ot.HTTPHeaders, carrier)
-	if err == nil {
-		log.Println("Creating child span")
-		// create child span
-		span = tracer.StartSpan("getOrder", ot.ChildOf(spanContext))
+	ctx, span := tracer.Start(ctx, "getOrder", trace.WithSpanKind(trace.SpanKindConsumer))
+	defer span.End()
 
-		fakeDataCenter := dataCenters[rand.Intn(len(dataCenters))]
-		span.SetTag("datacenter", fakeDataCenter)
-	} else {
-		log.Println(err)
-		log.Println("Failed to get context from headers")
-		log.Println("Creating root span")
-		// create root span
-		span = tracer.StartSpan("getOrder")
-	}
-
-	span.SetTag(string(ext.SpanKind), ext.SpanKindConsumerEnum)
-	span.SetTag(string(ext.MessageBusDestination), "robot-shop")
-	span.SetTag("exchange", "robot-shop")
-	span.SetTag("sort", "consume")
-	span.SetTag("address", "rabbitmq")
-	span.SetTag("key", "orders")
-	span.LogFields(otlog.String("orderid", order))
-	defer span.Finish()
+	fakeDataCenter := dataCenters[rand.Intn(len(dataCenters))]
+	span.SetAttributes(
+        attribute.String("datacenter", fakeDataCenter),
+        attribute.String("messaging.system", "rabbitmq"),
+        attribute.String("messaging.destination", "robot-shop"),
+        attribute.String("messaging.destination_kind", "queue"),
+        attribute.String("messaging.operation", "process"),
+        attribute.String("orderid", order),
+    )
 
 	time.Sleep(time.Duration(42+rand.Int63n(42)) * time.Millisecond)
+	
 	if rand.Intn(100) < errorPercent {
-		span.SetTag("error", true)
-		span.LogFields(
-			otlog.String("error.kind", "Exception"),
-			otlog.String("message", "Failed to dispatch to SOP"))
+        // Record Error
+		span.RecordError(fmt.Errorf("Failed to dispatch to SOP"))
+		span.SetStatus(codes.Error, "Failed to dispatch to SOP")
 		log.Println("Span tagged with error")
 	}
 
-	processSale(span)
+	processSale(ctx, tracer)
 }
 
-func processSale(parentSpan ot.Span) {
-	tracer := ot.GlobalTracer()
-	span := tracer.StartSpan("processSale", ot.ChildOf(parentSpan.Context()))
-	defer span.Finish()
-	span.SetTag(string(ext.SpanKind), "intermediate")
-	span.LogFields(otlog.String("info", "Order sent for processing"))
-	time.Sleep(time.Duration(42+rand.Int63n(42)) * time.Millisecond)
+func processSale(ctx context.Context, tracer trace.Tracer) {
+	_, span := tracer.Start(ctx, "processSale")
+	defer span.End()
+	
+    span.AddEvent("Order sent for processing")
+	
+    time.Sleep(time.Duration(42+rand.Int63n(42)) * time.Millisecond)
 }
 
 func main() {
 	rand.Seed(time.Now().Unix())
 
-	// Instana tracing
-	ot.InitGlobalTracer(instana.NewTracerWithOptions(&instana.Options{
-		Service:           Service,
-		LogLevel:          instana.Info,
-		EnableAutoProfile: true,
-	}))
+	tp := initTracer()
+	defer func() {
+		if err := tp.Shutdown(context.Background()); err != nil {
+			log.Printf("Error shutting down tracer provider: %v", err)
+		}
+	}()
 
 	// Init amqpUri
 	// get host from environment
@@ -223,6 +257,8 @@ func main() {
 				log.Printf("Order %s\n", d.Body)
 				log.Printf("Headers %v\n", d.Headers)
 				id := getOrderId(d.Body)
+				
+                // Call the updated createSpan
 				go createSpan(d.Headers, id)
 			}
 		}

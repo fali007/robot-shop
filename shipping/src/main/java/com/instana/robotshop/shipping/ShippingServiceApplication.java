@@ -3,8 +3,6 @@ package com.instana.robotshop.shipping;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.sql.DataSource;
-
-import com.instana.sdk.support.SpanSupport;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
@@ -59,18 +57,18 @@ public class ShippingServiceApplication implements WebMvcConfigurer {
         }
     }
 
-    @Override
-    public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(new InstanaDatacenterTagInterceptor());
-    }
+    // @Override
+    // public void addInterceptors(InterceptorRegistry registry) {
+    //     registry.addInterceptor(new InstanaDatacenterTagInterceptor());
+    // }
 
-    private static class InstanaDatacenterTagInterceptor extends HandlerInterceptorAdapter {
-        @Override
-        public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+    // private static class InstanaDatacenterTagInterceptor extends HandlerInterceptorAdapter {
+    //     @Override
+    //     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
 
-            SpanSupport.annotate("datacenter", DATA_CENTERS[new Random().nextInt(DATA_CENTERS.length)]);
+    //         SpanSupport.annotate("datacenter", DATA_CENTERS[new Random().nextInt(DATA_CENTERS.length)]);
 
-            return super.preHandle(request, response, handler);
-        }
-    }
+    //         return super.preHandle(request, response, handler);
+    //     }
+    // }
 }

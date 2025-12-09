@@ -1,13 +1,39 @@
-<!-- EUM include -->
+<script src="https://cdn.jsdelivr.net/npm/@opentelemetry/api@1.4.1/build/src/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@opentelemetry/core@1.15.2/build/src/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@opentelemetry/resources@1.15.2/build/src/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@opentelemetry/semantic-conventions@1.15.2/build/src/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@opentelemetry/sdk-trace-base@1.15.2/build/src/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@opentelemetry/sdk-trace-web@1.15.2/build/src/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@opentelemetry/instrumentation@0.41.2/build/src/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@opentelemetry/instrumentation-xml-http-request@0.41.2/build/src/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@opentelemetry/context-zone@1.15.2/build/src/index.min.js"></script>
+
 <script>
-  (function(s,t,a,n){s[t]||(s[t]=a,n=s[a]=function(){n.q.push(arguments)},
-  n.q=[],n.v=2,n.l=1*new Date)})(window,"InstanaEumObject","ineum");
+  (function() {
+    const { WebTracerProvider } = window.opentelemetry.web;
+    const { ConsoleSpanExporter, SimpleSpanProcessor } = window.opentelemetry.tracing;
+    const { XMLHttpRequestInstrumentation } = window.opentelemetry.instrumentation.xmlHttpRequest;
+    const { registerInstrumentations } = window.opentelemetry.instrumentation;
+    const { ZoneContextManager } = window.opentelemetry.context.zone;
 
-  ineum('reportingUrl', 'INSTANA_EUM_REPORTING_URL');
-  ineum('key', 'INSTANA_EUM_KEY');
-  ineum('trackSessions');
-  ineum('page', 'splash');
+    const provider = new WebTracerProvider();
+    
+    provider.addSpanProcessor(new SimpleSpanProcessor(new ConsoleSpanExporter()));
+
+    provider.register({
+      contextManager: new ZoneContextManager(),
+    });
+
+    registerInstrumentations({
+      instrumentations: [
+        new XMLHttpRequestInstrumentation({
+            propagateTraceHeaderCorsUrls: [
+                /.+/g, 
+            ]
+        }),
+      ],
+    });
+
+    console.log("OpenTelemetry Frontend Instrumentation Initialized");
+  })();
 </script>
-<script defer crossorigin="anonymous" src="INSTANA_EUM_REPORTING_URL/eum.min.js"></script>
-<!-- EUM include end -->
-

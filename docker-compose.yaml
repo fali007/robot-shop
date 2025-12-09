@@ -99,7 +99,12 @@ services:
       context: ratings
     image: ${REPO}/rs-ratings:${TAG}
     environment:
-      APP_ENV: prod
+      - APP_ENV=prod
+      - OTEL_PHP_AUTOLOAD_ENABLED=true
+      - OTEL_SERVICE_NAME=ratings
+      - OTEL_TRACES_EXPORTER=otlp
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     networks:
       - robot-shop
     depends_on:
