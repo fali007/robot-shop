@@ -1,4 +1,4 @@
-FROM nginx:1.21.6
+FROM nginx:1.27-bookworm
 
 EXPOSE 8080
 
